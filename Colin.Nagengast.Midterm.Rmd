@@ -1,0 +1,2790 @@
+---
+title: "South Dakota State University  \n STAT600 Summer 2020  \n Midterm Project"
+author: "Colin Nagengast"
+date: "July 12, 2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+options(digits=4)
+```
+# Project Purpose
+
+The purpose of this project is to analyze a farm field and determine how many grid cells the field should be split into in order to detect a statistically significant difference between two different groups or treatments applied to the farm field in future years.  In doing so I need to keep in mind the number of measurements that can be taken within a grid cell where a grid cell that is too small will result in too few yield measurements available and will also mean more work in applying the treatments to the field.  Grid cells that are too large will result in not being able to distinguish if a difference found is due to differences in treatments or just the location within the field.  In the end there will be two treatment groups, each with a quantity of (# Grid Cells)/2 sample units. 
+
+
+# Methodology
+
+I was given three datasets for yield results from a farm field for the seasons of 2015, 2016 and 2017.  The field measures 400 meters (north to south) by 600 meters (east to west).  Each dataset consists of thousands of records that include the yield counts taken by farm equipment and the corresponding coordinates of latitude and longitude of where in the field the yield counts were taken.
+
+My plan is to simulate applying two treatments, A and B, to the farm field.  I will do so by splitting the field up into grids ranging in size from four (two across by two top to bottom) to 1,600 (400 across by 400 top to bottom) and doing this 18 times in total.  Once the field is split up I will start from the bottom and take every odd numbered row and 'assign' it to Treatment A and every even numbered row will be 'assigned' to Treatment B.  Once I have all rows assigned I will then give numbers to all cells based upon their row and column number.  Summary statistics will then be computed for each treatment.  
+
+For the case of splitting the field into a 10x10 grid for 100 cells, there will be 50 Treatment A cells and 50 Treatment B cells.  I will create and assign the following:
+
+'M1' to be the grand mean of the 50 Treatment A Yield amount cell means 
+
+'M2' to be the grand mean of the 50 Treatment B Yield amount cell means 
+
+'S1' will be the standard deviation of the 50 cell means for Treatment A 
+
+'S2' will be the standard deviation of the 50 cell means for Treatment B 
+
+'N1' will be equal to 50, the number of Treatment A cells
+
+'N2' will be equal to 50 for the corresponding Treatment B cells  
+
+
+The result will be a data frame that measures 1x6 for each iteration of splitting up the farm field.  And I will have 18 of these iterations in total for a final 18 row data frame of summary data for each season.  I will then calculate the required replicates of grid cells necessary in order to find a significant statistical difference between the two groups.  This final piece will be done while assuming the percent difference between the two treatment group means for Yield counts will be 2.5%, 5% and 10%.  
+
+I will begin by researching and building my code using the 2015 yield data.  After it is tested, runs correctly and does everything I want it to do I will then apply it to the 2016 and 2017 datasets.  Because we are looking at agriculture data over a three year time span there will be differences between results from year to year.  Looking at three seasons of data will allow me to see best case and worst case scenarios within the data.  This simulation of dividing the field into two Treatment Groups allows me to see how much variation there is within a field assuming that the enitre field was treated the same for each season.  Therefore we would expect the differences of the mean Yield counts between Treatment A and Treatment B to be about zero which would be the same as a typical null-hypothesis.
+
+
+# R code methodology
+
+Most of the R code in this document and for this analysis was built by examining the 2015 yield dataset.  Therefore, I will present all of the R code for my analysis of the 2015 dataset along with all output.  I then re-ran the R code using the 2016 and 2017 datasets but will only show the code and output for the portions where I introduce the datasets and present the final statistics/plots.  The accompanying R Markdown file contains the complete code for the datasets for all three seasons.
+
+Here is a high level overview of what I did with R (more details to follow).  
+
+1.  Create a function called 'create.grid' to divide field into grid cells.
+
+2.  Create a function called 'create.cells' to aggregate the data to the cell level.
+
+3.  Create a function called 'create.dataframe' that includes means, standard deviations and sample sizes for all cells.
+
+4.  Assign rows to either Treatment A (odd rows) or Treatment B (even rows)
+
+5.  Create a function called 'create.comparison' where I aggregate to the Treatment level and compute an overall mean of Yield counts and standard deviation of cell means for both treatments.
+
+6.  Create function called 'required.replicates' that computes the coefficient of variation and the number of required replicates for percent difference values of 2.5%, 5% and 10% between Treatments A and B.  This is run after all grid cell iterations have been run and a summary file has been created.
+
+
+The above steps 1-6 create the functions used to extract, manipulate, format and create new attributes and calculate the required replicates for each grid cell size iteration for this project.
+
+The next steps involve the use of the 2015 season dataset and how the above functions are used.
+
+7.  Take a high level look at the dataset, checking for missing values, plotting the data, etc..
+
+8.  Run steps 1-5 for each of the 18 iterations of Grid Cell sizes I chose to investigate.
+
+9.  Run step 6 (required.replicate function) to create final table of statistics and associated plots of results.
+
+10.  Repeat steps 1-9 for the datasets for the years 2016 and 2017.
+
+
+
+
+
+
+# Function 1 - 'create.grid'
+
+This function will create a row number, *row*, column number, *col*, and cell number, *cell*, for each grid cell.  The function uses two parameters that the user defines: *numrow* (number of rows desired) and *numcol* (number of columns desired).  
+
+
+For example if a user calls the function with *numrow*=10 and *numcol*=10 then the function will produce row numbers from 1-10, column numbers from 1-10 and will compute cell numbers.
+
+
+The formula for *row* is: ceiling(*Latitude* / (400/*numrow*)), where 400 is the length of the field from north to south in meters.
+
+
+The formula for *col* is: ceiling(*Longitude* / (600/*numcol*)), where 600 is the length of the field from east to west in meters.
+
+
+The formula for *cell* is: (100)x(*row*) + *col*.
+
+
+The function prints out a message reporting what the minimum number of yield samples there are within a cell so I can keep track of which grid sizes produce cells with fewer than 30 yield samples.  Lastly, the function returns the original dataset columns along with the new *row*, *col* and *cell* columns.
+
+```{r}
+###########################################################################
+# Function 1 - Create Grid Over Field
+# 1 - Read in data
+# 2 - Assign Row, Column and Cell numbers to grid
+# 3 - Frequency count of yields per cell - print out minimum number
+# 4 - Frequency counts of yields by row and column
+# 5 - Return columns
+###########################################################################
+
+create.grid <- function(numrow, numcol) {
+
+HomePath = "../STAT600/home.2015.csv"
+home.dat <- read.csv(HomePath,header=TRUE)
+
+row <- ceiling(home.dat$Latitude/(400/numrow))
+col <- ceiling(home.dat$Longitude/(600/numcol))
+cell <- 100*(row) + col
+
+freq_yield <- aggregate(Yield ~ cell, data=home.dat, length)
+cat("Minimum number of Yield estimates is:",min(freq_yield[,2]),  "\n")
+
+return(list(X=home.dat$X, Yield=home.dat$Yield, Latitude=home.dat$Latitude, Longitude=home.dat$Longitude, row=row, col=col, cell=cell))
+}
+
+```
+
+
+
+# Function 2 - 'create.cells'
+
+This function, 'create.cells', requires no parameters as it takes the updated yield dataset (created from previous function) and aggregates the data to the cell level.  The new aggregated variables include: 
+
+*Cell_Means* - the mean Yield count for each cell
+
+*Cell_SDs* - the standard deviation of Yield count for each cell
+
+*Cell_Ns* - the number of Yield counts for each cell
+
+*min_lat* and *max_lat* - the minimum and maximum latitude for each cell
+
+*min_lon* and *max_lon* - the minimum and maximum longitude for each cell
+
+
+```{r}
+#######################################################################
+# Function 2 - Summarize Data to Create Data Frame of Cells
+# 1 - Find  minimum and maximum of Latitude and Longitude for each cell
+# 2 - Find Mean, SD and N of Yield for each cell
+# 3 - Return list of columns to create summarized data frame at cell level - in later function
+#######################################################################
+ 
+create.cells <- function() {
+min_lat <- aggregate(Latitude ~ cell, data=y, min, na.rm=TRUE)
+max_lat <- aggregate(Latitude ~ cell, data=y, max, na.rm=TRUE)
+
+min_lon <- aggregate(Longitude ~ cell, data=y, min, na.rm=TRUE)
+max_lon <- aggregate(Longitude ~ cell, data=y, max, na.rm=TRUE)
+
+Cell_Means <- aggregate(Yield ~ cell, data=y, mean, na.rm=TRUE)
+Cell_SDs <- aggregate(Yield ~ cell, data=y, sd, na.rm=TRUE)
+Cell_Ns <- aggregate(Yield ~ cell, data=y, length)
+
+return(list(min_lat=min_lat, max_lat=max_lat, min_lon=min_lon, max_lon=max_lon, Cell_Means=Cell_Means,Cell_SDs=Cell_SDs, Cell_Ns=Cell_Ns))
+
+}
+
+```
+
+
+
+# Function 3 - 'create.dataframe'
+
+The function, 'create.dataframe', requires no parameters and formally creates a proper dataframe from the aggregated data that was created in the previous function.  The new datafame is called 'Grid.dat' and includes the same columns that the previous function created but with new names: *Cell*, *N*, *LatMin*, *LatMax*, *LonMin*, *LonMax*, *M* (the cell means) and *S* (the cell standard deviations).  In addition a 0/1 indicator is calculated to determine if the cell contains 30 or more sample units.  A message is displayed to indicate the percent of cells with 30 or more sample units and the first six rows of the dataframe are printed.
+
+
+```{r}
+###########################################################################
+# Function 3 - Create Data Frame of Summarized Cell Data
+# 1 - Keep necessary columns for data frame
+# 2 - Determine which cells have greater than or equal to 30 observations
+# 3 - Print out few records of data frame and percent of cells with greater than or equal to 30 observations
+###########################################################################
+
+create.dataframe <- function() {
+Grid.dat <- data.frame(z[,1], z[,14], z[,2], z[,4], z[,6], z[,8], z[,10], z[,12])
+colnames(Grid.dat) = c("Cell", "N", "LatMin", "LatMax", "LonMin", "LonMax","M", "S") 
+
+Grid.dat$Cell_Yield30 <- ifelse(Grid.dat$N >= 30, 1, 0)
+
+print(head(Grid.dat))
+
+cat("Percent of Cells with Greater than or Equal to 30 Yields:", 100*(sum(Grid.dat$Cell_Yield30) / length(Grid.dat$Cell_Yield30)))
+
+return(Grid.dat)
+}
+
+```
+
+
+# Creating Treatment Groups
+
+In the code for each of the 18 grid cell creation iterations there is R code to separate the 'Grid.dat' dataframe into a Treatment A dataframe and a Treatment B dataframe.
+
+Below is R code that is used for the 10x10, 100 cell, iteration of creating grid cells:
+
+Grida.dat <- Grid.dat[c(c(1:10),c(21:30),c(41:50),c(61:70),c(81:90)),]
+
+Gridb.dat <- Grid.dat[c(c(11:20),c(31:40),c(51:60),c(71:80),c(91:100)),]
+
+Where 'Grida.dat' becomes the Treatment A dataframe and 'Gridb.dat' becomes the Treatment B dataframe.
+
+Again, code similar to this is repeated for each of the 18 iterations of grid cell sizes used in this project.
+
+
+
+# Function 4 - 'create.comparison'
+
+This function, 'create.comparison' requires no parameters and performs calculations on the two dataframes created in the step above.  For each datframe ('Grida.dat' and 'Gridb.dat'), I calculate the mean of all values in the *M* column for each dataframe.  These values are assigned *M1* for Treatment A and *M2* for Treatment B.  I calculate the standard deviation of all *M* values for each dataframe.  These values are assigned *S1* for Treatment A and *S2* for Treatment B.  The length of each *M* column is calculated for each dataframe.  These values are assigned as *N1* for Treatment A and *N2* for Treatment B.  Finally, these six columns are combined into a one row dataframe.
+
+Also in this function is code to find the average latitude and longitude for each cell within Treatment A and B, by adding the *LatMin* and *LatMax* together and dividing by two and doing the same with adding *LonMin* and *LonMax* together and dividing by two.  I then plot these averages of Latitude and Longitude to see how my treatments are distributed across the field.  If done correctly, the Treatment A cells will appear as red dots going across the field and the Treatment B cells will appear as blue dots going across the field.
+
+```{r}
+###############################################################
+# Function 4 - Summarize data to Treatment levels (A & B)
+# 1 - For Dataframes A and B, find the average Latitude and Longitude for each cell
+# 2 - Plot the Group A and Group B cells of the grid in red and blue to verify they were created correctly
+# 3 - Calculate Mean, SD and N for Group A (M1, S1, N1) and repeat for Group B (M2, S2, N2)
+# 4 - End Result is a one row data frame simulating summary results for comparing Group A and Group B
+###############################################################
+
+create.comparison <- function() {
+
+# Find average Latitude and Longitude for plotting
+  
+Grida.dat$Lat <- round((Grida.dat$LatMin + Grida.dat$LatMax)/2 ,2)
+Grida.dat$Lon <- round((Grida.dat$LonMin + Grida.dat$LonMax)/2 ,2)
+
+Gridb.dat$Lat <- round((Gridb.dat$LatMin + Gridb.dat$LatMax)/2 ,2)
+Gridb.dat$Lon <- round((Gridb.dat$LonMin + Gridb.dat$LonMax)/2 ,2)
+
+#Plot average Latitude and Longitude for both treatment dataframes to check accuracy
+
+plot(Lat ~ Lon, data=Grida.dat, xlim=c(0,600), ylim=c(0,400), type="p", pch=16, col="red",main="Red=Treatment 'A', Blue=Treatment'B'", xlab="Longitude", ylab="Latitude")
+points(Lat ~ Lon, data=Gridb.dat, xlim=c(0,600), ylim=c(0,400), type="p", pch=16, col="blue")
+
+# Calculate final Treatment Means, Standard Deviations and Sample Size for Treatments A & B
+
+M1 <- round(mean(Grida.dat$M),3)
+S1 <- round(sd(Grida.dat$M),3)
+N1 <- length(Grida.dat$M)
+
+M2 <- round(mean(Gridb.dat$M),3)
+S2 <- round(sd(Gridb.dat$M),3)
+N2 <- length(Gridb.dat$M)
+
+return(Grid.compare.dat <- data.frame(M1,S1,N1,M2,S2,N2))
+}
+
+```
+
+
+# Function 5 - 'required.replicates'
+
+This function, 'required.replicates' requires nine parameters, six required and three optional.  The six required are *m1*, *m2*, *s1*, *s2*, *n1* and *n2*, the means, standard deviations and sample sizes for Treatments A and B.  The three optional parameters are for $\alpha$, $\beta$ and *%Diff*, where `alpha=0.05` and `beta=0.2` are default values and *PctDiff_fix* will equal 0.025, 0.05 or 0.10.
+
+The functions calculates the following:
+
+$GridCells = {N_1 + N_2}$ (the number of grid cells between Treatments A & B)
+
+$CV = \frac{\sqrt{S_1^2 + S_2^2}}{(M_1 + M_2)/2}$.  (the Coefficient of Variation between Treatments A & B)
+
+$PctDiff = \frac{M_1 - M_2}   {(M_1 + M_2)/2}$   (the actual percent difference between Treatments A & B)
+
+$rr \ge 2\times \left( \frac{CV}{PctDiff} \right)^2 \times \left(z_{\alpha/2}+ z_\beta \right)^2$  
+(The number of required replicates for the Treatments A & B holding the PctDiff constant at .025, .05 or .10)
+
+The function returns the above data elements in addition to the original columns in one table with 18 rows.
+
+
+```{r}
+# Function for Required Replicates, CV and PctDiff
+
+required.replicates <- function(N1,N2,M1,M2,S1,S2, alpha=0.05, beta=0.20, PctDiff_fix=5) {
+GridCells <- N1+N2
+CV <- round(100*(sqrt(  (S1^2 + S2^2) / 2 ) / ((M1 + M2)/2)),3)
+PctDiff <- round(100*((M1 - M2) / ((M1 + M2)/2)),3)
+rr=ceiling(2 * ((CV / PctDiff_fix)^2) * ((qnorm(1-alpha/2,0,1)+qnorm(1-beta,0,1))^2))
+return(list  (GridCells=GridCells,N1=N1, M1=M1, S1=S1, N2=N2, M2=M2, S2=S2, CV=CV, PctDiff=PctDiff, rr=rr))
+}
+
+```
+
+
+
+
+
+
+# Introduce the 2015 dataset
+
+Here, I read in the dataset for the 2015 season and print out a summary of the dataset along with the first and last six records to inspect what is in the dataset.  I also check for missing values among the variables.  Lastly, I plot the points of latitude and longitude to get a sense of what the field looks like.
+
+
+```{r}
+
+# Read in the data for 2015
+
+Home2015Path = "../STAT600/home.2015.csv"
+home.2015.dat <- read.csv(Home2015Path,header=TRUE)
+
+# Print a summary, first six and last six observations
+summary(home.2015.dat)
+head(home.2015.dat)
+tail(home.2015.dat)
+which(is.na(home.2015.dat$X))
+which(is.na(home.2015.dat$Yield))
+which(is.na(home.2015.dat$Latitude))
+which(is.na(home.2015.dat$Longitude))
+
+# Plot the data with x=Longitude and y=Latitude
+
+plot(home.2015.dat$Longitude, home.2015.dat$Latitude, type="p", pch=16,main="2015 Field", xlab="Longitude", ylab="Latitude")
+
+```
+
+
+
+# Create 18 sets of grid cells across farm field and corresponding data frames
+
+Following are 18 R code chunks that call the above functions along with code to split the dataframe summarized at the cell level into separate Treatment A and Treatment B dataframes and then calling in the final function to create the final one row grid cell summary data frame.  There are comments at the top of each R code chunk that tell how many grid cells that the chunk will create.
+
+Within this code chunk the following output will be created:
+
+1. Message saying what the minimum number of yield estimates there are within a cell
+
+2. The first six rows of the original dataset with *row*, *col* and *cell* columns added
+
+3. The first six rows of the dataframe summarized at the cell level
+
+4. Message saying what percent of of cell grids have 30 or more yield counts
+
+5. A scatter plot of latitude and longitude points showing Treatment A cells (red) and Treatment B cells (blue)
+
+6. The final one row summary dataframe for this grid cell iteration
+
+
+```{r}
+###########################################
+# CREATE 2 ROWS BY 2 COLUMNS FOR 4 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=2, numcol=2))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(1,2),]
+Gridb.dat <- Grid.dat[c(3,4),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid1.compare.dat <- create.comparison()
+Grid1.compare.dat
+
+```
+
+
+```{r}
+##########################################
+# CREATE 4 ROWS BY 6 COLUMNS FOR 24 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=4, numcol=6))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:6),c(13:18)),]
+Gridb.dat <- Grid.dat[c(c(7:12),c(19:24)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid2.compare.dat <- create.comparison()
+Grid2.compare.dat
+
+
+```
+
+
+
+
+```{r}
+
+##########################################
+# CREATE 40 ROWS BY 40 COLUMNS FOR 1600 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=40, numcol=40))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:40),c(81:120),c(161:200),c(241:280),c(321:360),c(401:440),c(481:520),c(561:600),c(641:680),c(721:760),c(801:840),c(881:920),c(961:1000),c(1041:1080),c(1121:1160),c(1201:1240),c(1281:1320),c(1361:1400),c(1441:1480),c(1521:1560)),]
+
+Gridb.dat <- Grid.dat[c(c(41:80),c(121:160),c(201:240),c(281:320),c(361:400),c(441:480),c(521:560),c(601:640),c(681:720),c(761:800),c(841:880),c(921:960),c(1001:1040),c(1081:1120),c(1161:1200),c(1241:1280),c(1321:1360),c(1401:1440),c(1481:1520),c(1561:1600)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid3.compare.dat <- create.comparison()
+Grid3.compare.dat
+
+```
+
+
+
+
+```{r}
+##########################################
+# CREATE 4 ROWS BY 4 COLUMNS FOR 16 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=4, numcol=4))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:4),c(9:12)),]
+Gridb.dat <- Grid.dat[c(c(5:8),c(13:16)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid4.compare.dat <- create.comparison()
+Grid4.compare.dat
+
+```
+
+
+
+
+```{r}
+##########################################
+# CREATE 6 ROWS BY 6 COLUMNS FOR 36 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=6, numcol=6))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:6),c(13:18),c(25:30)),]
+Gridb.dat <- Grid.dat[c(c(7:12),c(19:24),c(31:36)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid5.compare.dat <- create.comparison()
+Grid5.compare.dat
+
+
+```
+
+
+
+
+```{r}
+##########################################
+# CREATE 8 ROWS BY 8 COLUMNS FOR 64 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=8, numcol=8))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:8),c(17:24),c(33:40),c(49:56)),]
+Gridb.dat <- Grid.dat[c(c(9:16),c(25:32),c(41:48),c(57:64)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid6.compare.dat <- create.comparison()
+Grid6.compare.dat
+
+
+```
+
+
+```{r}
+##########################################
+# CREATE 6 ROWS BY 8 COLUMNS FOR 48 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=6, numcol=8))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:8),c(17:24),c(33:40)),]
+Gridb.dat <- Grid.dat[c(c(9:16),c(25:32),c(41:48)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid8.compare.dat <- create.comparison()
+Grid8.compare.dat
+
+
+```
+
+
+
+
+```{r}
+
+##########################################
+# CREATE 10 ROWS BY 10 COLUMNS FOR 100 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=10, numcol=10))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:10),c(21:30),c(41:50),c(61:70),c(81:90)),]
+Gridb.dat <- Grid.dat[c(c(11:20),c(31:40),c(51:60),c(71:80),c(91:100)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid7.compare.dat <- create.comparison()
+Grid7.compare.dat
+
+
+
+
+```
+
+
+```{r}
+
+##########################################
+# CREATE 8 ROWS BY 10 COLUMNS FOR 80 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=8, numcol=10))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:10),c(21:30),c(41:50),c(61:70)),]
+Gridb.dat <- Grid.dat[c(c(11:20),c(31:40),c(51:60),c(71:80)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid9.compare.dat <- create.comparison()
+Grid9.compare.dat
+
+
+```
+
+
+```{r}
+
+##########################################
+# CREATE 12 ROWS BY 12 COLUMNS FOR 144 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=12, numcol=12))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:12),c(25:36),c(49:60),c(73:84),c(97:108),c(121:132)),]
+Gridb.dat <- Grid.dat[c(c(13:24),c(37:48),c(61:72),c(85:96),c(109:120),c(133:144)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid10.compare.dat <- create.comparison()
+Grid10.compare.dat
+
+
+```
+
+
+
+
+```{r}
+##########################################
+# CREATE 14 ROWS BY 14 COLUMNS FOR 196 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=14, numcol=14))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:14),c(29:42),c(57:70),c(85:98),c(113:126),c(141:154),c(169:182)),]
+Gridb.dat <- Grid.dat[c(c(15:28),c(43:56),c(71:84),c(99:112),c(127:140),c(155:168),c(183:196)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid11.compare.dat <- create.comparison()
+Grid11.compare.dat
+
+
+```
+
+
+
+```{r}
+##########################################
+# CREATE 16 ROWS BY 16 COLUMNS FOR 256 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=16, numcol=16))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:16),c(33:48),c(65:80),c(97:112),c(129:144),c(161:176),c(193:208),c(225:240)),]
+Gridb.dat <- Grid.dat[c(c(17:32),c(49:64),c(81:96),c(113:128),c(145:160),c(177:192),c(209:224),c(241:256)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid12.compare.dat <- create.comparison()
+Grid12.compare.dat
+
+```
+
+
+
+
+
+```{r}
+##########################################
+# CREATE 30 ROWS BY 30 COLUMNS FOR 900 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=30, numcol=30))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:30),c(61:90),c(121:150),c(181:210),c(241:270),c(301:330),c(361:390),c(421:450),c(481:510),c(541:570),c(601:630),c(661:690),c(721:750),c(781:810),c(841:870)),]
+
+Gridb.dat <- Grid.dat[c(c(31:60),c(91:120),c(151:180),c(211:240),c(271:300),c(331:360),c(391:420),c(451:480),c(511:540),c(571:600),c(631:660),c(691:720),c(751:780),c(811:840),c(871:900)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid13.compare.dat <- create.comparison()
+Grid13.compare.dat
+
+
+```
+
+
+
+
+
+
+```{r}
+##########################################
+# CREATE 26 ROWS BY 26 COLUMNS FOR 676 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=26, numcol=26))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:26),c(53:78),c(105:130),c(157:182),c(209:234),c(261:286),c(313:338),c(365:390),c(417:442),c(469:494),c(521:546),c(573:598),c(625:650)),]
+
+Gridb.dat <- Grid.dat[c(c(27:52),c(79:104),c(131:156),c(183:208),c(235:260),c(287:312),c(339:364),c(391:416),c(443:468),c(495:520),c(547:572),c(599:624),c(651:676)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid14.compare.dat <- create.comparison()
+Grid14.compare.dat
+
+
+
+```
+
+
+```{r}
+##########################################
+# CREATE 24 ROWS BY 24 COLUMNS FOR 576 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=24, numcol=24))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:24),c(49:72),c(97:120),c(145:168),c(193:216),c(241:264),c(289:312),c(337:360),c(385:408),c(433:456),c(481:504),c(529:552)),]
+
+Gridb.dat <- Grid.dat[c(c(25:48),c(73:96),c(121:144),c(169:192),c(217:240),c(265:288),c(313:336),c(361:384),c(409:432),c(457:480),c(505:528),c(553:576)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid15.compare.dat <- create.comparison()
+Grid15.compare.dat
+
+```
+
+
+```{r}
+
+##########################################
+# CREATE 22 ROWS BY 22 COLUMNS FOR 484 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=22, numcol=22))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:22),c(45:66),c(89:110),c(133:154),c(177:198),c(221:242),c(265:286),c(309:330),c(353:374),c(397:418),c(441:462)),]
+
+Gridb.dat <- Grid.dat[c(c(23:44),c(67:88),c(111:132),c(155:176),c(199:220),c(243:264),c(287:308),c(331:352),c(375:396),c(419:440),c(463:484)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid16.compare.dat <- create.comparison()
+Grid16.compare.dat
+
+```
+
+
+```{r}
+##########################################
+# CREATE 20 ROWS BY 20 COLUMNS FOR 400 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=20, numcol=20))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:20),c(41:60),c(81:100),c(121:140),c(161:180),c(201:220),c(241:260),c(281:300),c(321:340),c(361:380)),]
+
+Gridb.dat <- Grid.dat[c(c(21:40),c(61:80),c(101:120),c(141:160),c(181:200),c(221:240),c(261:280),c(301:320),c(341:360),c(381:400)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid17.compare.dat <- create.comparison()
+Grid17.compare.dat
+
+```
+
+
+```{r}
+##########################################
+# CREATE 18 ROWS BY 18 COLUMNS FOR 324 CELLS
+##########################################
+
+y <- data.frame(create.grid(numrow=18, numcol=18))
+head(y)
+
+z <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:18),c(37:54),c(73:90),c(109:126),c(145:162),c(181:198),c(217:234),c(253:270),c(289:306)),]
+
+Gridb.dat <- Grid.dat[c(c(19:36),c(55:72),c(91:108),c(127:144),c(163:180),c(199:216),c(235:252),c(271:288),c(307:324)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid18.compare.dat <- create.comparison()
+Grid18.compare.dat
+
+
+```
+
+
+
+
+
+
+# Calculate Required Replicates and Plots for 2015 Dataset
+
+Now that we have created 18 summary dataframes for Treatments A and B the following code will begin the conclusion of the analysis of the 2015 datasett.  First, we will stack the 18 dataframes together.  Then the 'required.replicates' function is run three times, once each for a fixed value of the Percent Difference paramteter, for values of 2.5%, 5% and 10%.  The dataframe with all 18 rows is printed three times (once for each value of PctDiff used in the function) along with the additional columns calculated within the function that include: *CV* (Coefficient of Variation), *PctDiff* (actual computed Percent Difference) and *rr* the required replicates required. 
+
+Plots of the results are printed and include:
+
+1. Required Replicates vs Coefficient of Variation
+
+2. Number of Grid Cells vs Coefficient of Variation
+
+3. Required Replicates vs Number of Grid Cells (for PctDiff = 5% and 10%)
+
+4. Required Replicates vs Number of Grid Cells (for PctDiff = 5% and 10% and 2.5%)
+
+```{r}
+########################################################################
+# 2015 Analysis
+# 1 - Stack all 17 summary files for varying number of grid cells together
+# 2 - Run Required Replicates 3 times for different values of PctDiff
+# 3 - Print out resulting tables showing actual PctDiff, CV and Required Replicates for each number of Grid Cells
+# 4 - Print Plots
+########################################################################
+
+
+# Stack all files together
+
+allGrid.dat = rbind(Grid1.compare.dat, Grid2.compare.dat,Grid3.compare.dat,Grid4.compare.dat,Grid5.compare.dat,Grid6.compare.dat, Grid7.compare.dat,Grid8.compare.dat,Grid9.compare.dat,Grid10.compare.dat,Grid11.compare.dat,Grid12.compare.dat,Grid13.compare.dat,Grid14.compare.dat,Grid15.compare.dat,Grid16.compare.dat,Grid17.compare.dat,Grid18.compare.dat)
+
+
+# Run Required Replicates function 3 times - once each for PctDiff set to 2.5%, 5% and 10%
+
+allGrid.final_025 <- data.frame(required.replicates(allGrid.dat$N1, 
+                                                   allGrid.dat$N2,
+                                                   allGrid.dat$M1,
+                                                   allGrid.dat$M2, 
+                                                   allGrid.dat$S1, 
+                                                   allGrid.dat$S2,
+                                                   alpha=0.05, beta=0.20, PctDiff_fix=2.5))
+
+allGrid.final_05 <- data.frame(required.replicates(allGrid.dat$N1, 
+                                                   allGrid.dat$N2,
+                                                   allGrid.dat$M1,
+                                                   allGrid.dat$M2, 
+                                                   allGrid.dat$S1, 
+                                                   allGrid.dat$S2,
+                                                   alpha=0.05, beta=0.20, PctDiff_fix=5))
+
+allGrid.final_10 <- data.frame(required.replicates(allGrid.dat$N1, 
+                                                   allGrid.dat$N2,
+                                                   allGrid.dat$M1,
+                                                   allGrid.dat$M2, 
+                                                   allGrid.dat$S1, 
+                                                   allGrid.dat$S2,
+                                                   alpha=0.05, beta=0.20, PctDiff_fix=10))
+
+# Print out summary tables for PctDiff = 2.5%
+allGrid.final_025[order(allGrid.final_025$GridCells),]
+
+# Print out summary tables for PctDiff = 5%
+allGrid.final_05[order(allGrid.final_05$GridCells),]
+
+# Print out summary tables for PctDiff = 10%
+allGrid.final_10[order(allGrid.final_10$GridCells),]
+
+
+# Plot Required Replicates vs Coefficient of Variation
+
+plot(rr ~ CV, data=allGrid.final_05, pch=16, col="red", ylim=c(0,1800), 
+                                     main="2015 - Required Replicates vs Coefficient of Variation (CV)", cex.main=0.8,
+                                     xlab="Coefficient of Variation (CV)",           
+                                     ylab="Required Replicates")
+points(rr ~ CV, data=allGrid.final_10, pch=16, col="blue")
+points(rr ~ CV, data=allGrid.final_025, pch=16, col="green")
+legend(10, 1500, legend=c("PctDiff=2.5%", "PctDiff=5%","PctDiff=10%"),
+               col=c("green", "red", "blue"), pch=c(16,16,16), cex=0.6)
+
+
+
+
+# Plot Number of Grid Cells vs Coefficient of Variation
+
+plot(GridCells ~ CV, data=allGrid.final_05, pch=16, col="red",
+                     main="2015 - Number of Grid Cells vs Coefficient of Variation (CV)", cex.main=0.8,
+                     xlab="Coefficient of Variation (CV)",           
+                     ylab="Number of Grid Cells")
+
+
+
+# Plot Number of Required Replicates vs Number of Grid Cells (for PctDiff = .05 and .10)
+
+plot(rr ~ GridCells, data=allGrid.final_05, pch=16, col="red", xlim=(c(0,max(GridCells))), ylim=c(0,500),
+                     main="2015 - Number of Required Replicates vs Number of Grid Cells", cex.main=0.8,
+                     xlab="Number of Grid Cells",
+                     ylab="Number of Required Replicates")
+points(rr ~ GridCells, data=allGrid.final_10, pch=16, col="blue", xlim=(c(0,max(GridCells))), ylim=c(0,max(rr)))
+abline(coef = c(0,0.5))
+legend(0, 500, legend=c("PctDiff=0.05","PctDiff=0.10"),
+                   col=c("red", "blue"), pch=c(16,16), cex=0.6)
+
+
+
+
+
+# Plot Number of Required Replicates vs Number of Grid Cells (for PctDiff = .05 and .10 and .025)
+
+plot(rr ~ GridCells, data=allGrid.final_05, pch=16, col="red", xlim=(c(0,max(GridCells))), ylim=c(0,1800),
+                     main="2015 - Number of Required Replicates vs Number of Grid Cells", cex.main=0.8,
+                     xlab="Number of Grid Cells",
+                     ylab="Number of Required Replicates")
+points(rr ~ GridCells, data=allGrid.final_10, pch=16, col="blue", xlim=(c(0,max(GridCells))), ylim=c(0,max(rr)))
+points(rr ~ GridCells, data=allGrid.final_025, pch=16, col="green", xlim=(c(0,max(GridCells))), ylim=c(0,max(rr)))
+abline(coef = c(0,0.5))
+legend(0, 1750, legend=c("PctDiff=0.025", "PctDiff=0.05","PctDiff=0.10"),
+               col=c("green", "red", "blue"), pch=c(16,16,16), cex=0.6)
+
+```
+
+# Analysis of 2015 Field Results
+
+The overall mean yield count is near 36 among my treatment divisions.  The standard deviations of cell yield means increases as we further divide the field up into smaller and smaller grids, from about 3 for 4 cell grids up to 9 for 1,600 cell grids.  As we divided the field up into cell grids once we reached 256 (25 meters by 37.5 meters) that was the highest number of grid cells where there were still 30 or more yields per cell.  Therefore we really shouldn't look at dividing the field into smaller cells of 25x37.5 meters.  
+
+The plot of CV versus Required Replicates shows that the number of required replicates increases as the CV increases and it increases more for lower Percent Differences between the two treatments (2.5% vs 5% vs 10%).
+
+The plot of CV versus Number of Grid Cells shows that the CV increases as we increase the number of grid cells, or we divide the field up into smaller and smaller cells.
+
+I have two plots of Number of Grid Cells versus Number of Required Replicates.  The first shows the data with separate trends using Percent Difference equal to 5% and 10% while the second plot adds the trend for 2.5%.  The plots show the relationship between required replicates and number of grid cells where as the number of grid cells increases the number of required replicates increases but the number of replicates needed levels off and we look for where the number of grid cells is twice the number of required replicates.  I added the trend line to show where the number of grid cells is twice that of the number of required replicates.  
+
+Now, looking at the final results table and the plots, if we seek a Percent Difference between the two treatment means of 5% then it looks like we should use 676 grid cells as that gives us 332 required replicates.  But from when we divided up the field we saw that only 1.2% of the cells had 30 or more yield samples.  So I will need to make an adjustment.  The number of grid cells that gave us a minimum of 30 yield samples was 256.  I will use that information in the next R code chunk where I devleop a new required replicates function and find what is the lowest Percent Difference will work with 256 grid cells.
+
+For a Percent Difference of 10%, the difference requires fewer replicates to detect this difference.  It looks like 100 grid cells, dividing the field up by 60x40 meter sections as that will give us twice the number of replicates needed, which is 52.
+
+For a Percent Difference of 2.5%, the smaller difference requires many more replicates to detect a difference. Based upon the 2015 dataset there aren't enough grid cells available to divide the field into in order to detect a 2.5% percent differnece between treatment means.
+
+
+
+
+
+
+
+
+# Function to Determine Minimum Percent Difference for Required Replicates
+
+From the above analysis we saw that for a 5% Percent Difference the number of grid cells needed was too high as most cells had fewer than 30 yield samples.  Therefore, using the lowest number of grid cells in my analysis that had 30 or more yield samples in all cells, 256, I now can calculate the lowest Percent Difference we can use so that the number of grid cells is twice that of the required replicates.  
+
+The below function, 'required.replicates2', is a slightly modified version of the original 'required.replicates' function.  It only returns the required replicates that are calculated.  This code chunk will calculate the number of required replicates, using the data from the summary table above for Grid Cells = 256 for PctDiff in increments of 0.5% from 5.0% to 10.0%.  A dataframe returning the percent difference and required replicates is created and the relationship between the two is plotted.  A horizontal line showing the point at which required replicates are half of the 256 grid cells is plotted.  Where the points cross this horizontal line will be a good Percent Difference to use for when dividing the field into 256 grid cells.
+
+
+```{r}
+# Find Minimum Percent Difference to use with 256 Grid Cells
+
+required.replicates2 <- function(N1,N2,M1,M2,S1,S2, alpha=0.05, beta=0.20, PctDiff_fix=5) {
+CV <- 100*(sqrt(  (S1^2 + S2^2) / 2 ) / ((M1 + M2)/2))
+PctDiff <- 100*((M1 - M2) / ((M1 + M2)/2))  
+return(rr=ceiling(2 * ((CV / PctDiff_fix)^2) * ((qnorm(1-alpha/2,0,1)+qnorm(1-beta,0,1))^2)))
+}
+
+akeep <- vector()
+a <- 5
+rrkeep <- vector()
+k <- vector()
+
+for (i in 1:11) { 
+k[i] <- i
+rr <- required.replicates2(128,  128, 36.04, 35.53, 7.28, 7.21, alpha=0.05, beta=0.20, PctDiff_fix=a)
+rrkeep[i] <- rr
+akeep[i] <- a
+a <- a + 0.5
+
+}
+
+find.min <- data.frame(akeep,rrkeep)
+colnames(find.min) = c("PctDiff", "ReqRep") 
+find.min
+
+
+
+plot(ReqRep ~ PctDiff, data=find.min, pch=16, col="red",
+                     main="2015 - 256 Grid Cells: PctDiff vs Required Replicates", cex.main=0.8,
+                     xlab="Percent Difference",
+                     ylab="Required Replicates")
+abline(h = 256/2)
+```
+
+# Finding PctDiff for Grid Cells = 256
+
+From the plot I see that the Percent Difference is at about 7% for when the number of grid cells (256) is about double the number of required replicates (132).  Thus, a 7% Percent Difference between treatment means is what we can use when dividing the field into 256 grid cells, so that every cell has a minimum of 30 yield samples.  This is the result for the 2015 dataset.  The result could differ when looking at the 2016 and 2017 datasets.  I will look at the those datasets next.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#################################################################
+# Function 1 - Create Grid Over Field
+# 1 - Read in data
+# 2 - Assign Row, Column and Cell numbers to grid
+# 3 - Frequency count of yields per cell - print out minimum number
+# 4 - Frequency counts of yields by row and column
+# 5 - Return columns
+#################################################################
+
+create.grid <- function(numrow, numcol) {
+
+HomePath = "../STAT600/home.2016.csv"
+home.dat <- read.csv(HomePath,header=TRUE)
+
+row <- ceiling(home.dat$Latitude/(400/numrow))
+col <- ceiling(home.dat$Longitude/(600/numcol))
+cell <- 100*(row) + col
+
+freq_yield <- aggregate(Yield ~ cell, data=home.dat, length)
+cat("Minimum number of Yield estimates is:",min(freq_yield[,2]),  "\n")
+print(aggregate(Yield ~ row, data=home.dat, length))
+print(aggregate(Yield ~ col, data=home.dat, length))
+
+return(list(X=home.dat$X, Yield=home.dat$Yield, Latitude=home.dat$Latitude, Longitude=home.dat$Longitude, row=row, col=col, cell=cell))
+}
+
+```
+
+
+
+
+```{r}
+#############################################################
+# Function 2 - Summarize Data to Create Data Frame of Cells
+# 1 - Fin  minimum and maximum of Latitude and Longitude for each cell
+# 2 - Find Mean, SD and N of Yield for each cell
+# 3 - Return list of columns to create summarized data frame at cell level - in later function
+##############################################################
+ 
+create.cells <- function() {
+min_lat <- aggregate(Latitude ~ cell, data=a, min, na.rm=TRUE)
+max_lat <- aggregate(Latitude ~ cell, data=a, max, na.rm=TRUE)
+
+min_lon <- aggregate(Longitude ~ cell, data=a, min, na.rm=TRUE)
+max_lon <- aggregate(Longitude ~ cell, data=a, max, na.rm=TRUE)
+
+Cell_Means <- aggregate(Yield ~ cell, data=a, mean, na.rm=TRUE)
+Cell_SDs <- aggregate(Yield ~ cell, data=a, sd, na.rm=TRUE)
+Cell_Ns <- aggregate(Yield ~ cell, data=a, length)
+
+return(list(min_lat=min_lat, max_lat=max_lat, min_lon=min_lon, max_lon=max_lon, Cell_Means=Cell_Means,Cell_SDs=Cell_SDs, Cell_Ns=Cell_Ns))
+
+}
+
+```
+
+
+
+
+
+```{r}
+#################################################################
+# Function 3 - Create Data Frame of Summarized Cell Data
+# 1 - Keep necessary columns for data frame
+# 2 - Determine which cells have greater than or equal to 30 observations
+# 3 - Print out few records of data frame and percent of cells with greater than or equal to 30 observations
+#################################################################
+
+create.dataframe <- function() {
+Grid.dat <- data.frame(b[,1], b[,14], b[,2], b[,4], b[,6], b[,8], b[,10], b[,12])
+colnames(Grid.dat) = c("Cell", "N", "LatMin", "LatMax", "LonMin", "LonMax","M", "S") 
+
+Grid.dat$Cell_Yield30 <- ifelse(Grid.dat$N >= 30, 1, 0)
+
+head(Grid.dat)
+
+cat("Percent of Cells with Greater than or Equal to 30 Yields:", 100*(sum(Grid.dat$Cell_Yield30) / length(Grid.dat$Cell_Yield30)))
+
+return(Grid.dat)
+}
+
+```
+
+
+
+
+
+```{r}
+###############################################################
+# Function 4 - finalize format file of cell grids
+# 1 - For Dataframes A and B, find the average Latitude and Longitude for each cell
+# 2 - Plot the Group A and Group B cells of the grid in red and blue to verify they were created correctly
+# 3 - Calculate Mean, SD and N for Group A (M1, S1, N1) and repeat for Group B (M2, S2, N2)
+# 4 - End Result is a one row data frame simulating summary results for comparing Group A and Group B
+################################################################
+
+create.comparison <- function() {
+
+Grida.dat$Lat <- round((Grida.dat$LatMin + Grida.dat$LatMax)/2 ,2)
+Grida.dat$Lon <- round((Grida.dat$LonMin + Grida.dat$LonMax)/2 ,2)
+
+Gridb.dat$Lat <- round((Gridb.dat$LatMin + Gridb.dat$LatMax)/2 ,2)
+Gridb.dat$Lon <- round((Gridb.dat$LonMin + Gridb.dat$LonMax)/2 ,2)
+
+#Plot average Latitude and Longitude for both treatment dataframes to check accuracy
+
+plot(Lat ~ Lon, data=Grida.dat, xlim=c(0,600), ylim=c(0,400), type="p", pch=16, col="red",main="Red=Treatment 'A', Blue=Treatment'B'", xlab="Longitude", ylab="Latitude")
+points(Lat ~ Lon, data=Gridb.dat, xlim=c(0,600), ylim=c(0,400), type="p", pch=16, col="blue")
+
+# Calculate final Treatment Means, Standard Deviations and Sample Size for Treatments A & B
+
+M1 <- round(mean(Grida.dat$M),3)
+S1 <- round(sd(Grida.dat$M),3)
+N1 <- length(Grida.dat$M)
+
+M2 <- round(mean(Gridb.dat$M),3)
+S2 <- round(sd(Gridb.dat$M),3)
+N2 <- length(Gridb.dat$M)
+
+
+return(Grid.compare.dat <- data.frame(M1,S1,N1,M2,S2,N2))
+}
+
+```
+
+
+
+```{r}
+# Function for Required Replicates, CV and PctDiff
+
+required.replicates <- function(N1,N2,M1,M2,S1,S2, alpha=0.05, beta=0.20, PctDiff_fix=5) {
+GridCells <- N1+N2
+CV <- round(100*(sqrt(  (S1^2 + S2^2) / 2 ) / ((M1 + M2)/2)),3)
+PctDiff <- round(100*((M1 - M2) / ((M1 + M2)/2)),3)
+rr=ceiling(2 * ((CV / PctDiff_fix)^2) * ((qnorm(1-alpha/2,0,1)+qnorm(1-beta,0,1))^2))
+return(list  (GridCells=GridCells,N1=N1, M1=M1, S1=S1, N2=N2, M2=M2, S2=S2, CV=CV, PctDiff=PctDiff, rr=rr))
+}
+
+```
+
+
+# Introduce the 2016 dataset
+
+Here, I read in the dataset for the 2016 season and print out a summary of the dataset along with the first and last six records to inspect what is in the dataset.  I also check for missing values among the variables.  Lastly, I plot the points of latitude and longitude to get a sense of what the field looks like.
+```{r}
+# Read in the data for 2016
+
+Home2016Path = "../STAT600/home.2016.csv"
+home.2016.dat <- read.csv(Home2016Path,header=TRUE)
+
+# Print a summary, first six and last six observations
+summary(home.2016.dat)
+head(home.2016.dat)
+tail(home.2016.dat)
+which(is.na(home.2016.dat$X))
+which(is.na(home.2016.dat$Yield))
+which(is.na(home.2016.dat$Latitude))
+which(is.na(home.2016.dat$Longitude))
+
+# Plot the data with x=Longitude and y=Latitude
+
+plot(home.2016.dat$Longitude, home.2016.dat$Latitude, type="p", main="2016 Field", xlab="Longitude", ylab="Latitude")
+
+```
+
+
+
+
+```{r, include = FALSE}
+###########################################
+# CREATE 2 ROWS BY 2 COLUMNS FOR 4 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=2, numcol=2))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(1,2),]
+Gridb.dat <- Grid.dat[c(3,4),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid1.compare.dat <- create.comparison()
+Grid1.compare.dat
+
+
+```
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 4 ROWS BY 6 COLUMNS FOR 24 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=4, numcol=6))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:6),c(13:18)),]
+Gridb.dat <- Grid.dat[c(c(7:12),c(19:24)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid2.compare.dat <- create.comparison()
+Grid2.compare.dat
+
+
+```
+
+
+
+
+```{r, include = FALSE}
+
+##########################################
+# CREATE 40 ROWS BY 40 COLUMNS FOR 1600 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=40, numcol=40))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:40),c(81:120),c(161:200),c(241:280),c(321:360),c(401:440),c(481:520),c(561:600),c(641:680),c(721:760),c(801:840),c(881:920),c(961:1000),c(1041:1080),c(1121:1160),c(1201:1240),c(1281:1320),c(1361:1400),c(1441:1480),c(1521:1560)),]
+
+Gridb.dat <- Grid.dat[c(c(41:80),c(121:160),c(201:240),c(281:320),c(361:400),c(441:480),c(521:560),c(601:640),c(681:720),c(761:800),c(841:880),c(921:960),c(1001:1040),c(1081:1120),c(1161:1200),c(1241:1280),c(1321:1360),c(1401:1440),c(1481:1520),c(1561:1600)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid3.compare.dat <- create.comparison()
+Grid3.compare.dat
+
+```
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 4 ROWS BY 4 COLUMNS FOR 16 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=4, numcol=4))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:4),c(9:12)),]
+Gridb.dat <- Grid.dat[c(c(5:8),c(13:16)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid4.compare.dat <- create.comparison()
+Grid4.compare.dat
+
+```
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 6 ROWS BY 6 COLUMNS FOR 36 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=6, numcol=6))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:6),c(13:18),c(25:30)),]
+Gridb.dat <- Grid.dat[c(c(7:12),c(19:24),c(31:36)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid5.compare.dat <- create.comparison()
+Grid5.compare.dat
+
+
+```
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 8 ROWS BY 8 COLUMNS FOR 64 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=8, numcol=8))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:8),c(17:24),c(33:40),c(49:56)),]
+Gridb.dat <- Grid.dat[c(c(9:16),c(25:32),c(41:48),c(57:64)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid6.compare.dat <- create.comparison()
+Grid6.compare.dat
+
+
+```
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 6 ROWS BY 8 COLUMNS FOR 48 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=6, numcol=8))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:8),c(17:24),c(33:40)),]
+Gridb.dat <- Grid.dat[c(c(9:16),c(25:32),c(41:48)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid8.compare.dat <- create.comparison()
+Grid8.compare.dat
+
+
+```
+
+
+
+
+```{r, include = FALSE}
+
+##########################################
+# CREATE 10 ROWS BY 10 COLUMNS FOR 100 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=10, numcol=10))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:10),c(21:30),c(41:50),c(61:70),c(81:90)),]
+Gridb.dat <- Grid.dat[c(c(11:20),c(31:40),c(51:60),c(71:80),c(91:100)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid7.compare.dat <- create.comparison()
+Grid7.compare.dat
+
+
+
+
+```
+
+
+```{r, include = FALSE}
+
+##########################################
+# CREATE 8 ROWS BY 10 COLUMNS FOR 80 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=8, numcol=10))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:10),c(21:30),c(41:50),c(61:70)),]
+Gridb.dat <- Grid.dat[c(c(11:20),c(31:40),c(51:60),c(71:80)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid9.compare.dat <- create.comparison()
+Grid9.compare.dat
+
+
+```
+
+
+```{r, include = FALSE}
+
+##########################################
+# CREATE 12 ROWS BY 12 COLUMNS FOR 144 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=12, numcol=12))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:12),c(25:36),c(49:60),c(73:84),c(97:108),c(121:132)),]
+Gridb.dat <- Grid.dat[c(c(13:24),c(37:48),c(61:72),c(85:96),c(109:120),c(133:144)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid10.compare.dat <- create.comparison()
+Grid10.compare.dat
+
+
+```
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 14 ROWS BY 14 COLUMNS FOR 196 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=14, numcol=14))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:14),c(29:42),c(57:70),c(85:98),c(113:126),c(141:154),c(169:182)),]
+Gridb.dat <- Grid.dat[c(c(15:28),c(43:56),c(71:84),c(99:112),c(127:140),c(155:168),c(183:196)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid11.compare.dat <- create.comparison()
+Grid11.compare.dat
+
+
+```
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 16 ROWS BY 16 COLUMNS FOR 256 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=16, numcol=16))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:16),c(33:48),c(65:80),c(97:112),c(129:144),c(161:176),c(193:208),c(225:240)),]
+Gridb.dat <- Grid.dat[c(c(17:32),c(49:64),c(81:96),c(113:128),c(145:160),c(177:192),c(209:224),c(241:256)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid12.compare.dat <- create.comparison()
+Grid12.compare.dat
+
+```
+
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 30 ROWS BY 30 COLUMNS FOR 900 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=30, numcol=30))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:30),c(61:90),c(121:150),c(181:210),c(241:270),c(301:330),c(361:390),c(421:450),c(481:510),c(541:570),c(601:630),c(661:690),c(721:750),c(781:810),c(841:870)),]
+
+Gridb.dat <- Grid.dat[c(c(31:60),c(91:120),c(151:180),c(211:240),c(271:300),c(331:360),c(391:420),c(451:480),c(511:540),c(571:600),c(631:660),c(691:720),c(751:780),c(811:840),c(871:900)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid13.compare.dat <- create.comparison()
+Grid13.compare.dat
+
+
+```
+
+
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 26 ROWS BY 26 COLUMNS FOR 676 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=26, numcol=26))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:26),c(53:78),c(105:130),c(157:182),c(209:234),c(261:286),c(313:338),c(365:390),c(417:442),c(469:494),c(521:546),c(573:598),c(625:650)),]
+
+Gridb.dat <- Grid.dat[c(c(27:52),c(79:104),c(131:156),c(183:208),c(235:260),c(287:312),c(339:364),c(391:416),c(443:468),c(495:520),c(547:572),c(599:624),c(651:676)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid14.compare.dat <- create.comparison()
+Grid14.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 24 ROWS BY 24 COLUMNS FOR 576 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=24, numcol=24))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:24),c(49:72),c(97:120),c(145:168),c(193:216),c(241:264),c(289:312),c(337:360),c(385:408),c(433:456),c(481:504),c(529:552)),]
+
+Gridb.dat <- Grid.dat[c(c(25:48),c(73:96),c(121:144),c(169:192),c(217:240),c(265:288),c(313:336),c(361:384),c(409:432),c(457:480),c(505:528),c(553:576)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid15.compare.dat <- create.comparison()
+Grid15.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+
+##########################################
+# CREATE 22 ROWS BY 22 COLUMNS FOR 484 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=22, numcol=22))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:22),c(45:66),c(89:110),c(133:154),c(177:198),c(221:242),c(265:286),c(309:330),c(353:374),c(397:418),c(441:462)),]
+
+Gridb.dat <- Grid.dat[c(c(23:44),c(67:88),c(111:132),c(155:176),c(199:220),c(243:264),c(287:308),c(331:352),c(375:396),c(419:440),c(463:484)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid16.compare.dat <- create.comparison()
+Grid16.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 20 ROWS BY 20 COLUMNS FOR 400 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=20, numcol=20))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:20),c(41:60),c(81:100),c(121:140),c(161:180),c(201:220),c(241:260),c(281:300),c(321:340),c(361:380)),]
+
+Gridb.dat <- Grid.dat[c(c(21:40),c(61:80),c(101:120),c(141:160),c(181:200),c(221:240),c(261:280),c(301:320),c(341:360),c(381:400)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid17.compare.dat <- create.comparison()
+Grid17.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 18 ROWS BY 18 COLUMNS FOR 324 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=18, numcol=18))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:18),c(37:54),c(73:90),c(109:126),c(145:162),c(181:198),c(217:234),c(253:270),c(289:306)),]
+
+Gridb.dat <- Grid.dat[c(c(19:36),c(55:72),c(91:108),c(127:144),c(163:180),c(199:216),c(235:252),c(271:288),c(307:324)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid18.compare.dat <- create.comparison()
+Grid18.compare.dat
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+###############################################################
+# 2016 Analysis
+# 1 - Stack all 17 summary files for varying number of grid cells together
+# 2 - Run Required Replicates 3 times for different values of PctDiff
+# 3 - Print out resulting tables showing actual PctDiff, CV and Required Replicates for each number of Grid Cells
+# 4 - Print Plots
+##############################################################
+
+
+# Stack all files together
+
+allGrid.dat = rbind(Grid1.compare.dat, Grid2.compare.dat,Grid3.compare.dat,Grid4.compare.dat,Grid5.compare.dat,Grid6.compare.dat, Grid7.compare.dat,Grid8.compare.dat,Grid9.compare.dat,Grid10.compare.dat,Grid11.compare.dat,Grid12.compare.dat,Grid13.compare.dat,Grid14.compare.dat,Grid15.compare.dat,Grid16.compare.dat,Grid17.compare.dat,Grid18.compare.dat)
+
+
+# Run Required Replicates function 3 times - once each for PctDiff set to 2.5%, 5% and 10%
+
+allGrid.final_025 <- data.frame(required.replicates(allGrid.dat$N1, 
+                                                   allGrid.dat$N2,
+                                                   allGrid.dat$M1,
+                                                   allGrid.dat$M2, 
+                                                   allGrid.dat$S1, 
+                                                   allGrid.dat$S2,
+                                                   alpha=0.05, beta=0.20, PctDiff_fix=2.5))
+
+allGrid.final_05 <- data.frame(required.replicates(allGrid.dat$N1, 
+                                                   allGrid.dat$N2,
+                                                   allGrid.dat$M1,
+                                                   allGrid.dat$M2, 
+                                                   allGrid.dat$S1, 
+                                                   allGrid.dat$S2,
+                                                   alpha=0.05, beta=0.20, PctDiff_fix=5))
+
+allGrid.final_10 <- data.frame(required.replicates(allGrid.dat$N1, 
+                                                   allGrid.dat$N2,
+                                                   allGrid.dat$M1,
+                                                   allGrid.dat$M2, 
+                                                   allGrid.dat$S1, 
+                                                   allGrid.dat$S2,
+                                                   alpha=0.05, beta=0.20, PctDiff_fix=10))
+
+# Print out summary tables for PctDiff = 2.5%
+allGrid.final_025[order(allGrid.final_025$GridCells),]
+
+# Print out summary tables for PctDiff = 5%
+allGrid.final_05[order(allGrid.final_05$GridCells),]
+
+# Print out summary tables for PctDiff = 10%
+allGrid.final_10[order(allGrid.final_10$GridCells),]
+
+
+# Plot Required Replicates vs Coefficient of Variation
+
+plot(rr ~ CV, data=allGrid.final_05, pch=16, col="red", ylim=c(0,1800), 
+                                     main="2016 - Required Replicates vs Coefficient of Variation (CV)",cex.main=0.8,
+                                     xlab="Coefficient of Variation (CV)",           
+                                     ylab="Required Replicates")
+points(rr ~ CV, data=allGrid.final_10, pch=16, col="blue")
+points(rr ~ CV, data=allGrid.final_025, pch=16, col="green")
+legend(10, 1500, legend=c("PctDiff=2.5%", "PctDiff=5%","PctDiff=10%"),
+               col=c("green", "red", "blue"), pch=c(16,16,16), cex=0.6)
+
+
+
+
+# Plot Number of Grid Cells vs Coefficient of Variation
+
+plot(GridCells ~ CV, data=allGrid.final_05, pch=16, col="red",
+                     main="2016 - Number of Grid Cells vs Coefficient of Variation (CV)",cex.main=0.8,
+                     xlab="Coefficient of Variation (CV)",           
+                     ylab="Number of Grid Cells")
+
+
+
+# Plot Number of Required Replicates vs Number of Grid Cells (for PctDiff = .05 and .10)
+
+plot(rr ~ GridCells, data=allGrid.final_05, pch=16, col="red", xlim=(c(0,max(GridCells))), ylim=c(0,500),
+                     main="2016 - Number of Required Replicates vs Number of Grid Cells",cex.main=0.8,
+                     xlab="Number of Grid Cells",
+                     ylab="Number of Required Replicates")
+points(rr ~ GridCells, data=allGrid.final_10, pch=16, col="blue", xlim=(c(0,max(GridCells))), ylim=c(0,max(rr)))
+abline(coef = c(0,0.5))
+legend(0, 500, legend=c("PctDiff=5%","PctDiff=10%"),
+                   col=c("red", "blue"), pch=c(16,16), cex=0.6)
+
+
+
+
+
+# Plot Number of Required Replicates vs Number of Grid Cells (for PctDiff = .05 and .10 and .025)
+
+plot(rr ~ GridCells, data=allGrid.final_05, pch=16, col="red", xlim=(c(0,max(GridCells))), ylim=c(0,1800),
+                     main="2016 - Number of Required Replicates vs Number of Grid Cells",cex.main=0.8,
+                     xlab="Number of Grid Cells",
+                     ylab="Number of Required Replicates")
+points(rr ~ GridCells, data=allGrid.final_10, pch=16, col="blue", xlim=(c(0,max(GridCells))), ylim=c(0,max(rr)))
+points(rr ~ GridCells, data=allGrid.final_025, pch=16, col="green", xlim=(c(0,max(GridCells))), ylim=c(0,max(rr)))
+abline(coef = c(0,0.5))
+legend(0, 1750, legend=c("PctDiff=2.5%", "PctDiff=5%","PctDiff=10%"),
+               col=c("green", "red", "blue"), pch=c(16,16,16), cex=0.6)
+
+```
+
+# Analysis of 2016 Field Results
+
+The overall mean yield count is around 118 among my treatment divisions, a large increase over the 2015's number.  The standard deviations of cell yield means increases as we further divide the field up into smaller and smaller grids, from about 8 for 4 cell grids up to 30 for 1,600 cell grids, again larger values when compared to 2015.  As we divided the field up into cell grids once we reached 144 (33.3 meters by 50 meters) that was the highest number of grid cells where there were still 30 or more yields per cell.  Therefore we really shouldn't look at dividing the field into smaller cells of 33.3x50 meters.  
+
+The four plots for 2016 look very similar to the plots for 2015 in terms of relationships and trends of the variables being plotted.
+
+Now, looking at the final results table and the plots, if we seek a Percent Difference between the two treatment means of 5% then it looks like we should once again use 676 grid cells as that gives us 334 required replicates.  But from when we divided up the field we saw that 0% of the cells had 30 or more yield samples.  So I will need to make an adjustment.  The number of grid cells that gave us a minimum of 30 yield samples was 144.  I will use that information in the next R code chunk where I find what is the lowest Percent Difference will work with 144 grid cells similar to what I did with the 2015 dataset for 256 grid cells..
+
+For a Percent Difference of 10%, the difference requires fewer replicates to detect this difference.  It looks like 80 grid cells, dividing the field up by 60x50 meter sections will require us to need 38 replicates.
+
+For a Percent Difference of 2.5%, the smaller difference requires many more replicates to detect a difference. Based upon the 2016 dataset there aren't enough grid cells available to divide the field into in order to detect a 2.5% percent differnece between treatment means.
+
+
+
+
+
+
+```{r}
+# Find Minimum Percent Difference to use with 144 Grid Cells
+
+required.replicates2 <- function(N1,N2,M1,M2,S1,S2, alpha=0.05, beta=0.20, PctDiff_fix=0.05) {
+CV <- 100*(sqrt(  (S1^2 + S2^2) / 2 ) / ((M1 + M2)/2))
+PctDiff <- 100*((M1 - M2) / ((M1 + M2)/2)  )
+return(rr=ceiling(2 * ((CV / PctDiff_fix)^2) * ((qnorm(1-alpha/2,0,1)+qnorm(1-beta,0,1))^2)))
+}
+
+akeep <- vector()
+a <- 5
+rrkeep <- vector()
+k <- vector()
+
+for (i in 1:10) { 
+k[i] <- i
+rr <- required.replicates2(72,  72, 119.3964, 115.3747, 18.66, 21.43, alpha=0.05, beta=0.20, PctDiff_fix=a)
+rrkeep[i] <- rr
+a <- a + 0.5
+akeep[i] <- a
+}
+
+find.min <- data.frame(akeep,rrkeep)
+colnames(find.min) = c("PctDiff", "ReqRep") 
+find.min
+
+
+
+plot(ReqRep ~ PctDiff, data=find.min, pch=16, col="red",
+                     main="2016 - 144 Grid Cells: PctDiff vs Required Replicates", cex.main=0.8,
+                     xlab="Percent Difference",
+                     ylab="Required Replicates")
+abline(h = 144/2)
+```
+
+# Finding PctDiff for Grid Cells = 144
+
+From the plot I see that the Percent Difference is at about 8.5% for when the number of grid cells (144) is about double the number of required replicates (72).  Thus, a 8.5% Percent Difference between treatment means is what we can use when dividing the field into 144 grid cells, so that every cell has a minimum of 30 yield samples.  This is the result for the 2016 dataset.   I will still look at the 2017 dataset next to see what it has to say.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r, include = FALSE}
+##########################################################################
+# Function 1 - Create Grid Over Field
+# 1 - Read in data
+# 2 - Assign Row, Column and Cell numbers to grid
+# 3 - Frequency count of yields per cell - print out minimum number
+# 4 - Frequency counts of yields by row and column
+# 5 - Return columns
+#########################################################################
+
+create.grid <- function(numrow, numcol) {
+
+HomePath = "../STAT600/home.2017.csv"
+home.dat <- read.csv(HomePath,header=TRUE)
+
+row <- ceiling(home.dat$Latitude/(400/numrow))
+col <- ceiling(home.dat$Longitude/(600/numcol))
+cell <- 100*(row) + col
+
+freq_yield <- aggregate(Yield ~ cell, data=home.dat, length)
+cat("Minimum number of Yield estimates is:",min(freq_yield[,2]),  "\n")
+print(aggregate(Yield ~ row, data=home.dat, length))
+print(aggregate(Yield ~ col, data=home.dat, length))
+
+return(list(X=home.dat$X, Yield=home.dat$Yield, Latitude=home.dat$Latitude, Longitude=home.dat$Longitude, row=row, col=col, cell=cell))
+}
+
+```
+
+
+
+
+```{r, include = FALSE}
+##############################################################
+# Function 2 - Summarize Data to Create Data Frame of Cells
+# 1 - Fin  minimum and maximum of Latitude and Longitude for each cell
+# 2 - Find Mean, SD and N of Yield for each cell
+# 3 - Return list of columns to create summarized data frame at cell level - in later function
+#############################################################
+ 
+create.cells <- function() {
+min_lat <- aggregate(Latitude ~ cell, data=a, min, na.rm=TRUE)
+max_lat <- aggregate(Latitude ~ cell, data=a, max, na.rm=TRUE)
+
+min_lon <- aggregate(Longitude ~ cell, data=a, min, na.rm=TRUE)
+max_lon <- aggregate(Longitude ~ cell, data=a, max, na.rm=TRUE)
+
+Cell_Means <- aggregate(Yield ~ cell, data=a, mean, na.rm=TRUE)
+Cell_SDs <- aggregate(Yield ~ cell, data=a, sd, na.rm=TRUE)
+Cell_Ns <- aggregate(Yield ~ cell, data=a, length)
+
+return(list(min_lat=min_lat, max_lat=max_lat, min_lon=min_lon, max_lon=max_lon, Cell_Means=Cell_Means,Cell_SDs=Cell_SDs, Cell_Ns=Cell_Ns))
+
+}
+
+```
+
+
+
+
+
+```{r, include = FALSE}
+############################################################
+# Function 3 - Create Data Frame of Summarized Cell Data
+# 1 - Keep necessary columns for data frame
+# 2 - Determine which cells have greater than or equal to 30 observations
+# 3 - Print out few records of data frame and percent of cells with greater than or equal to 30 observations
+###########################################################
+
+create.dataframe <- function() {
+Grid.dat <- data.frame(b[,1], b[,14], b[,2], b[,4], b[,6], b[,8], b[,10], b[,12])
+colnames(Grid.dat) = c("Cell", "N", "LatMin", "LatMax", "LonMin", "LonMax","M", "S") 
+
+Grid.dat$Cell_Yield30 <- ifelse(Grid.dat$N >= 30, 1, 0)
+
+head(Grid.dat)
+
+cat("Percent of Cells with Greater than or Equal to 30 Yields:", 100*(sum(Grid.dat$Cell_Yield30) / length(Grid.dat$Cell_Yield30)))
+
+return(Grid.dat)
+}
+
+```
+
+
+
+
+
+```{r, include = FALSE}
+##########################################################################
+# Function 4 - finalize format file of cell grids
+# 1 - For Dataframes A and B, find the average Latitude and Longitude for each cell
+# 2 - Plot the Group A and Group B cells of the grid in red and blue to verify they were created correctly
+# 3 - Calculate Mean, SD and N for Group A (M1, S1, N1) and repeat for Group B (M2, S2, N2)
+# 4 - End Result is a one row data frame simulating summary results for comparing Group A and Group B
+##########################################################################
+
+create.comparison <- function() {
+
+Grida.dat$Lat <- round((Grida.dat$LatMin + Grida.dat$LatMax)/2 ,2)
+Grida.dat$Lon <- round((Grida.dat$LonMin + Grida.dat$LonMax)/2 ,2)
+
+Gridb.dat$Lat <- round((Gridb.dat$LatMin + Gridb.dat$LatMax)/2 ,2)
+Gridb.dat$Lon <- round((Gridb.dat$LonMin + Gridb.dat$LonMax)/2 ,2)
+
+#Plot average Latitude and Longitude for both treatment dataframes to check accuracy
+
+plot(Lat ~ Lon, data=Grida.dat, xlim=c(0,600), ylim=c(0,400), type="p", pch=16, col="red",main="Red=Treatment 'A', Blue=Treatment'B'", xlab="Longitude", ylab="Latitude")
+points(Lat ~ Lon, data=Gridb.dat, xlim=c(0,600), ylim=c(0,400), type="p", pch=16, col="blue")
+
+# Calculate final Treatment Means, Standard Deviations and Sample Size for Treatments A & B
+
+M1 <- round(mean(Grida.dat$M),3)
+S1 <- round(sd(Grida.dat$M),3)
+N1 <- length(Grida.dat$M)
+
+M2 <- round(mean(Gridb.dat$M),3)
+S2 <- round(sd(Gridb.dat$M),3)
+N2 <- length(Gridb.dat$M)
+
+
+return(Grid.compare.dat <- data.frame(M1,S1,N1,M2,S2,N2))
+}
+
+```
+
+
+
+```{r, include = FALSE}
+# Function for Required Replicates, CV and PctDiff
+
+required.replicates <- function(N1,N2,M1,M2,S1,S2, alpha=0.05, beta=0.20, PctDiff_fix=5) {
+GridCells <- N1+N2
+CV <- round(100*(sqrt(  (S1^2 + S2^2) / 2 ) / ((M1 + M2)/2)),3)
+PctDiff <- round(100*((M1 - M2) / ((M1 + M2)/2)),3)
+rr=ceiling(2 * ((CV / PctDiff_fix)^2) * ((qnorm(1-alpha/2,0,1)+qnorm(1-beta,0,1))^2))
+return(list  (GridCells=GridCells,N1=N1, M1=M1, S1=S1, N2=N2, M2=M2, S2=S2, CV=CV, PctDiff=PctDiff, rr=rr))
+}
+
+```
+
+
+
+
+
+# Introduce the 2017 dataset
+
+Here, I read in the dataset for the 2017 season and print out a summary of the dataset along with the first and last six records to inspect what is in the dataset.  I also check for missing values among the variables.  Lastly, I plot the points of latitude and longitude to get a sense of what the field looks like.
+```{r}
+
+# Read in the data for 2017
+
+Home2017Path = "../STAT600/home.2017.csv"
+home.2017.dat <- read.csv(Home2017Path,header=TRUE)
+
+# Print a summary, first six and last six observations
+summary(home.2017.dat)
+head(home.2017.dat)
+tail(home.2017.dat)
+which(is.na(home.2017.dat$X))
+which(is.na(home.2017.dat$Yield))
+which(is.na(home.2017.dat$Latitude))
+which(is.na(home.2017.dat$Longitude))
+
+# Plot the data with x=Longitude and y=Latitude
+
+plot(home.2017.dat$Longitude, home.2017.dat$Latitude, type="p",main="2017 Field", xlab="Longitude", ylab="Latitude")
+
+```
+
+
+
+
+
+```{r, include = FALSE}
+###########################################
+# CREATE 2 ROWS BY 2 COLUMNS FOR 4 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=2, numcol=2))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(1,2),]
+Gridb.dat <- Grid.dat[c(3,4),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid1.compare.dat <- create.comparison()
+Grid1.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 4 ROWS BY 6 COLUMNS FOR 24 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=4, numcol=6))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:6),c(13:18)),]
+Gridb.dat <- Grid.dat[c(c(7:12),c(19:24)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid2.compare.dat <- create.comparison()
+Grid2.compare.dat
+
+```
+
+
+
+
+```{r, include = FALSE}
+
+##########################################
+# CREATE 40 ROWS BY 40 COLUMNS FOR 1600 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=40, numcol=40))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:40),c(81:120),c(161:200),c(241:280),c(321:360),c(401:440),c(481:520),c(561:600),c(641:680),c(721:760),c(801:840),c(881:920),c(961:1000),c(1041:1080),c(1121:1160),c(1201:1240),c(1281:1320),c(1361:1400),c(1441:1480),c(1521:1560)),]
+
+Gridb.dat <- Grid.dat[c(c(41:80),c(121:160),c(201:240),c(281:320),c(361:400),c(441:480),c(521:560),c(601:640),c(681:720),c(761:800),c(841:880),c(921:960),c(1001:1040),c(1081:1120),c(1161:1200),c(1241:1280),c(1321:1360),c(1401:1440),c(1481:1520),c(1561:1600)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid3.compare.dat <- create.comparison()
+Grid3.compare.dat
+
+```
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 4 ROWS BY 4 COLUMNS FOR 16 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=4, numcol=4))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:4),c(9:12)),]
+Gridb.dat <- Grid.dat[c(c(5:8),c(13:16)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid4.compare.dat <- create.comparison()
+Grid4.compare.dat
+
+```
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 6 ROWS BY 6 COLUMNS FOR 36 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=6, numcol=6))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:6),c(13:18),c(25:30)),]
+Gridb.dat <- Grid.dat[c(c(7:12),c(19:24),c(31:36)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid5.compare.dat <- create.comparison()
+Grid5.compare.dat
+
+```
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 8 ROWS BY 8 COLUMNS FOR 64 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=8, numcol=8))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:8),c(17:24),c(33:40),c(49:56)),]
+Gridb.dat <- Grid.dat[c(c(9:16),c(25:32),c(41:48),c(57:64)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid6.compare.dat <- create.comparison()
+Grid6.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 6 ROWS BY 8 COLUMNS FOR 48 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=6, numcol=8))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:8),c(17:24),c(33:40)),]
+Gridb.dat <- Grid.dat[c(c(9:16),c(25:32),c(41:48)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid8.compare.dat <- create.comparison()
+Grid8.compare.dat
+
+```
+
+
+
+
+```{r, include = FALSE}
+
+##########################################
+# CREATE 10 ROWS BY 10 COLUMNS FOR 100 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=10, numcol=10))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:10),c(21:30),c(41:50),c(61:70),c(81:90)),]
+Gridb.dat <- Grid.dat[c(c(11:20),c(31:40),c(51:60),c(71:80),c(91:100)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid7.compare.dat <- create.comparison()
+Grid7.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+
+##########################################
+# CREATE 8 ROWS BY 10 COLUMNS FOR 80 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=8, numcol=10))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:10),c(21:30),c(41:50),c(61:70)),]
+Gridb.dat <- Grid.dat[c(c(11:20),c(31:40),c(51:60),c(71:80)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid9.compare.dat <- create.comparison()
+Grid9.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+
+##########################################
+# CREATE 12 ROWS BY 12 COLUMNS FOR 144 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=12, numcol=12))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:12),c(25:36),c(49:60),c(73:84),c(97:108),c(121:132)),]
+Gridb.dat <- Grid.dat[c(c(13:24),c(37:48),c(61:72),c(85:96),c(109:120),c(133:144)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid10.compare.dat <- create.comparison()
+Grid10.compare.dat
+
+```
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 14 ROWS BY 14 COLUMNS FOR 196 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=14, numcol=14))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:14),c(29:42),c(57:70),c(85:98),c(113:126),c(141:154),c(169:182)),]
+Gridb.dat <- Grid.dat[c(c(15:28),c(43:56),c(71:84),c(99:112),c(127:140),c(155:168),c(183:196)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid11.compare.dat <- create.comparison()
+Grid11.compare.dat
+
+```
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 16 ROWS BY 16 COLUMNS FOR 256 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=16, numcol=16))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:16),c(33:48),c(65:80),c(97:112),c(129:144),c(161:176),c(193:208),c(225:240)),]
+Gridb.dat <- Grid.dat[c(c(17:32),c(49:64),c(81:96),c(113:128),c(145:160),c(177:192),c(209:224),c(241:256)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid12.compare.dat <- create.comparison()
+Grid12.compare.dat
+
+```
+
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 30 ROWS BY 30 COLUMNS FOR 900 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=30, numcol=30))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:30),c(61:90),c(121:150),c(181:210),c(241:270),c(301:330),c(361:390),c(421:450),c(481:510),c(541:570),c(601:630),c(661:690),c(721:750),c(781:810),c(841:870)),]
+
+Gridb.dat <- Grid.dat[c(c(31:60),c(91:120),c(151:180),c(211:240),c(271:300),c(331:360),c(391:420),c(451:480),c(511:540),c(571:600),c(631:660),c(691:720),c(751:780),c(811:840),c(871:900)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid13.compare.dat <- create.comparison()
+Grid13.compare.dat
+
+```
+
+
+
+
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 26 ROWS BY 26 COLUMNS FOR 676 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=26, numcol=26))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:26),c(53:78),c(105:130),c(157:182),c(209:234),c(261:286),c(313:338),c(365:390),c(417:442),c(469:494),c(521:546),c(573:598),c(625:650)),]
+
+Gridb.dat <- Grid.dat[c(c(27:52),c(79:104),c(131:156),c(183:208),c(235:260),c(287:312),c(339:364),c(391:416),c(443:468),c(495:520),c(547:572),c(599:624),c(651:676)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid14.compare.dat <- create.comparison()
+Grid14.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 24 ROWS BY 24 COLUMNS FOR 576 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=24, numcol=24))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:24),c(49:72),c(97:120),c(145:168),c(193:216),c(241:264),c(289:312),c(337:360),c(385:408),c(433:456),c(481:504),c(529:552)),]
+
+Gridb.dat <- Grid.dat[c(c(25:48),c(73:96),c(121:144),c(169:192),c(217:240),c(265:288),c(313:336),c(361:384),c(409:432),c(457:480),c(505:528),c(553:576)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid15.compare.dat <- create.comparison()
+Grid15.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+
+##########################################
+# CREATE 22 ROWS BY 22 COLUMNS FOR 484 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=22, numcol=22))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:22),c(45:66),c(89:110),c(133:154),c(177:198),c(221:242),c(265:286),c(309:330),c(353:374),c(397:418),c(441:462)),]
+
+Gridb.dat <- Grid.dat[c(c(23:44),c(67:88),c(111:132),c(155:176),c(199:220),c(243:264),c(287:308),c(331:352),c(375:396),c(419:440),c(463:484)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid16.compare.dat <- create.comparison()
+Grid16.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 20 ROWS BY 20 COLUMNS FOR 400 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=20, numcol=20))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:20),c(41:60),c(81:100),c(121:140),c(161:180),c(201:220),c(241:260),c(281:300),c(321:340),c(361:380)),]
+
+Gridb.dat <- Grid.dat[c(c(21:40),c(61:80),c(101:120),c(141:160),c(181:200),c(221:240),c(261:280),c(301:320),c(341:360),c(381:400)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid17.compare.dat <- create.comparison()
+Grid17.compare.dat
+
+```
+
+
+```{r, include = FALSE}
+##########################################
+# CREATE 18 ROWS BY 18 COLUMNS FOR 324 CELLS
+##########################################
+
+a <- data.frame(create.grid(numrow=18, numcol=18))
+head(a)
+
+b <- data.frame(create.cells())
+
+Grid.dat <- create.dataframe()
+
+######################################################
+# Divide up Data Frame into two - Group A and Group B
+######################################################
+Grida.dat <- Grid.dat[c(c(1:18),c(37:54),c(73:90),c(109:126),c(145:162),c(181:198),c(217:234),c(253:270),c(289:306)),]
+
+Gridb.dat <- Grid.dat[c(c(19:36),c(55:72),c(91:108),c(127:144),c(163:180),c(199:216),c(235:252),c(271:288),c(307:324)),]
+
+#######################################
+# Create Final Comparison File 
+#######################################
+Grid18.compare.dat <- create.comparison()
+Grid18.compare.dat
+
+```
+
+
+```{r}
+########################################################################
+# 2017 Analysis
+# 1 - Stack all 17 summary files for varying number of grid cells together
+# 2 - Run Required Replicates 3 times for different values of PctDiff
+# 3 - Print out resulting tables showing actual PctDiff, CV and Required Replicates for each number of Grid Cells
+# 4 - Print Plots
+#######################################################################
+
+
+# Stack all files together
+
+allGrid.dat = rbind(Grid1.compare.dat, Grid2.compare.dat,Grid3.compare.dat,Grid4.compare.dat,Grid5.compare.dat,Grid6.compare.dat, Grid7.compare.dat,Grid8.compare.dat,Grid9.compare.dat,Grid10.compare.dat,Grid11.compare.dat,Grid12.compare.dat,Grid13.compare.dat,Grid14.compare.dat,Grid15.compare.dat,Grid16.compare.dat,Grid17.compare.dat,Grid18.compare.dat)
+
+
+# Run Required Replicates function 3 times - once each for PctDiff set to 0.025, 0.05 and 0.10 (2.5%, 5% and 10%)
+
+allGrid.final_025 <- data.frame(required.replicates(allGrid.dat$N1, 
+                                                   allGrid.dat$N2,
+                                                   allGrid.dat$M1,
+                                                   allGrid.dat$M2, 
+                                                   allGrid.dat$S1, 
+                                                   allGrid.dat$S2,
+                                                   alpha=0.05, beta=0.20, PctDiff_fix=2.5))
+
+allGrid.final_05 <- data.frame(required.replicates(allGrid.dat$N1, 
+                                                   allGrid.dat$N2,
+                                                   allGrid.dat$M1,
+                                                   allGrid.dat$M2, 
+                                                   allGrid.dat$S1, 
+                                                   allGrid.dat$S2,
+                                                   alpha=0.05, beta=0.20, PctDiff_fix=5))
+
+allGrid.final_10 <- data.frame(required.replicates(allGrid.dat$N1, 
+                                                   allGrid.dat$N2,
+                                                   allGrid.dat$M1,
+                                                   allGrid.dat$M2, 
+                                                   allGrid.dat$S1, 
+                                                   allGrid.dat$S2,
+                                                   alpha=0.05, beta=0.20, PctDiff_fix=10))
+
+# Print out summary tables for PctDiff = 2.5%, 5% and 10%
+
+allGrid.final_025[order(allGrid.final_025$GridCells),]
+allGrid.final_05[order(allGrid.final_05$GridCells),]
+allGrid.final_10[order(allGrid.final_10$GridCells),]
+
+
+# Plot Required Replicates vs Coefficient of Variation
+
+plot(rr ~ CV, data=allGrid.final_05, pch=16, col="red", ylim=c(0,120), 
+                                     main="2017 - Required Replicates vs Coefficient of Variation (CV)",cex.main=0.8,
+                                     xlab="Coefficient of Variation (CV)",           
+                                     ylab="Required Replicates")
+points(rr ~ CV, data=allGrid.final_10, pch=16, col="blue")
+points(rr ~ CV, data=allGrid.final_025, pch=16, col="green")
+legend(2, 110, legend=c("PctDiff=2.5%", "PctDiff=5%","PctDiff=10%"),
+               col=c("green", "red", "blue"), pch=c(16,16,16), cex=0.6)
+
+
+
+
+# Plot Number of Grid Cells vs Coefficient of Variation
+
+plot(GridCells ~ CV, data=allGrid.final_05, pch=16, col="red",
+                     main="2017 - Number of Grid Cells vs Coefficient of Variation (CV)",cex.main=0.8,
+                     xlab="Coefficient of Variation (CV)",           
+                     ylab="Number of Grid Cells")
+
+
+
+# Plot Number of Required Replicates vs Number of Grid Cells (for PctDiff = .05 and .10)
+
+plot(rr ~ GridCells, data=allGrid.final_05, pch=16, col="red", xlim=(c(0,max(GridCells))), ylim=c(0,40),
+                     main="2017 - Number of Required Replicates vs Number of Grid Cells",cex.main=0.8,
+                     xlab="Number of Grid Cells",
+                     ylab="Number of Required Replicates")
+points(rr ~ GridCells, data=allGrid.final_10, pch=16, col="blue", xlim=(c(0,max(GridCells))), ylim=c(0,max(rr)))
+abline(coef = c(0,0.5))
+legend(250, 35, legend=c("PctDiff=5%","PctDiff=10%"),
+                   col=c("red", "blue"), pch=c(16,16), cex=0.6)
+
+
+
+
+
+# Plot Number of Required Replicates vs Number of Grid Cells (for PctDiff = .05 and .10 and .025)
+
+plot(rr ~ GridCells, data=allGrid.final_05, pch=16, col="red", xlim=(c(0,max(GridCells))), ylim=c(0,120),
+                     main="2017 - Number of Required Replicates vs Number of Grid Cells", cex.main=0.8,
+                     xlab="Number of Grid Cells",
+                     ylab="Number of Required Replicates")
+points(rr ~ GridCells, data=allGrid.final_10, pch=16, col="blue", xlim=(c(0,max(GridCells))), ylim=c(0,max(rr)))
+points(rr ~ GridCells, data=allGrid.final_025, pch=16, col="green", xlim=(c(0,max(GridCells))), ylim=c(0,max(rr)))
+abline(coef = c(0,0.5))
+legend(300, 110, legend=c("PctDiff=2.5%", "PctDiff=5%","PctDiff=10%"),
+               col=c("green", "red", "blue"), pch=c(16,16,16), cex=0.6)
+
+```
+
+# Analysis of 2017 Field Results
+
+The overall mean yield count is around 58.5 among my treatment divisions, a decrease from 2016 but slightly higher than 2015.  The standard deviations of cell yield means increases as we further divide the field up into smaller and smaller grids, from about 1 for 4 cell grids up to 3.7 for 1,600 cell grids.  There is very little variation in this field when compared to the two previous years.  As we divided the field up into cell grids once we reached 196 (42.857 meters by 28.571 meters) that was the highest number of grid cells where there were still 30 or more yields per cell.  Therefore we really shouldn't look at dividing the field into smaller cells of 42.857 meters by 28.571 meters.  
+
+The four plots for 2017 look very similar to the plots for the other two years in terms of relationships and trends of the variables being plotted.  
+
+Now, looking at the final results table and the plots, if we seek a Percent Difference between the two treatment means of 5% then it looks like we could use a field with very few grid cells.  But we also must keep in mind that we require a minimum of 12 error degrees of freedom. Therefore, I would use 16 grid cells.  
+
+For a Percent Difference of 10%, the answer would be the same, 16 grid cells, so that we would have a minimum of 12 error degrees of freedom available.
+
+And this time, thanks to the low variance among the field, for a 2.5% Percent Difference between treatments, we can find this using 36 grid cells.
+
+
+# Final Comments
+
+The 2017 field dataset showed a 'best' case scenario of simulating the treatments across the field.  There was very little variation across the field so any difference between the treatments could easily be captured with little effort.  If I was planning on an actual experiment I would rather use the results of 2015 and 2016.
+
+In looking at the 2015 and 2016 datasets, the 2015 had lower yields and lower variation, while 2016 had higher yields and higher variation.  I feel safer in knowing that for 2015 I had to split the field up into 256 grid cells in order to maintain that all cells had at minimum 30 yield samples.  In my analysis for 2016 once I split the field up into 196 I had already encountered some fields with less than 30 yield samples.  So, I would rather error on the side of caution and split the field up into more grid cells than less.
+
+Therefore, my goal would be to split the field into 256 grid cells and aim for detecting a Percent Difference of 7%.
+
+
+
+

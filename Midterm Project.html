@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+</head>
+<body>
+<p>Suppose I want to test agronomic practices in collaboration with a commercial farmer. We might decide to divide a field into manageable units, by superimposing a grid on the field. How many grid cells should we use? Another way to say this, is, what is optimal grid cell size?</p>
+<p></p>
+<p>We have some data from previous harvest years in the form of yield monitor data. Briefly, grain (corn, soybeans and wheat, in our data) is measured as it passes through the combine and sampled at one second intervals. The estimated yield for each sample (in units of bushels per acre) is then tagged with a GPS coordinate identifying a position in the field. There may be thousands of such yield samples in a single field.</p>
+<p></p>
+<p>You will be given three data sets to start with. Each represents a different harvest from a single field (we call this the Home section). I've trimmed the data to be a regular square of 600 by 400 meters. The original GPS coordinates have been converted to metric units, with the origin in the lower left corner. Each yield data point is uniquely identified by distance from the origin, in the columns Longitude and Latitude. Your task will be to determine how to subdivide the field into grid cells so that I can plan an on-farm experiment to compare two different agronomic practices.</p>
+<p></p>
+<p>Consider, as a first step, that I can divide the field into quadrants (NW, NE, SW, SE) and averaged over the yield samples found in each quadrant. That is, the yield Estimate for the SW corner is the average of yield samples lying at 0&lt;Latitude&lt;200 and 0&lt;Longitude&lt;300.</p>
+<p></p>
+<p>From these 4 Estimates I can calculate a grand Mean and Standard Deviation, and then a CV (Coefficient of Variation) of the grand Mean relative to Standard Deviation. Suppose I hope to measure a 5% Difference between two agronomic practices. We can use the formula for required replicates to determine how many grid cells I will need for each practice.</p>
+<p></p>
+<p>Obviously, 4 cells will not be enough for a reasonable experiment. You will need to determine an optimal number. You can do this two ways.</p>
+<p><br />1. Divide each grid cell into quadrants. Thus, 4 grid cells will become 16. Calculate Estimates for each cell, then recalculate Mean, SD, CV and required replicates. Continue this process for some number of grid cells. How you determine that number is up to you, but you will need to make an argument for your choice. Keep in mind that I would like at least 30 yield samples per cell. Also keep in mind that if I were to analyze the proposed experiment using a one-way analysis of variance, I would like at least 12 degrees for freedom for the residual (error) mean square.</p>
+<p>2. Consider that the width of the combine is about 5 meters, so it does little good to have grid cells smaller than that. Iterate over a range of cell widths and calculate Estimates for each cell, then recalculate Mean, SD, CV and required replicates for each cell size.</p>
+<p></p>
+<p>In either case, you will want to plot the relationship between grid cell size or number and CV, and the relationship between grid cell size or number and required replicates.</p>
+<p>Produce plots of Required Replicates versus grid size for an expected %Difference of 2.5%, 5% and 10%, and for each of the three available data files. Keep in mind that I may request you repeat this analysis with data sets from other years, so write functions as appropriate. I won't know the CV of the actual experiment, so what are the best case and worst case scenarios, based on these three data sets? You might also plot the relationship between CV and grid size.</p>
+<p>What if I cannot divide the field into enough cells to produce the required replicates. Can you determine how small a %Difference I could detect, given maximum number of cells available and given the constraint that we need at least 30 yield samples per cell?</p>
+</body>
+</html>
