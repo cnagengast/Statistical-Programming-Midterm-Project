@@ -1,2 +1,2 @@
-# SDSU-STAT600-Midterm
-South Dakota State University - STAT600 - Statistical Programming - Midterm Project - July 2020
+# SDSU-Statistical Programming Midterm Project
+South Dakota State University - Statistical Programming - Midterm Project - July 2020
